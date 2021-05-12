@@ -88,21 +88,28 @@ bool sign_state_pos = false;
 uint32_t step_count = 0;
 
 bool new_step = false;
+int lastY = 0;
 
 //###################################################################
+//Used to process the data after the button is pressed
 uint32_t process_bottle_data(int16_t x, int16_t y, int16_t z){
   
   int buttonTransition;
-
+  
   if(buttonState){
-    NRF_LOG_DEBUG("x = %d, y=%d, z =%d\r\n",x,y,z);
-    if(abs(y)>2000){
-        m_ui_led_constant_set(0,0,0);
-        app_timer_stop(drink_it);
+    
+    if(abs(y-lastY) > 5 && y < 60){ //if there is acceleration and orientation of bottle is less than 60
+        m_ui_led_constant_set(0,0,0); //turn off LED
+        app_timer_stop(drink_it); //Stop the timer
+        buttonTransition = 1;
     }
-    buttonTransition = 1;
+    lastY = y; //used to detect an acceleration of the bottle
   }
 
+/*
+* The timer is reset on the release of the button 
+* and after a sip is detected.
+*/
   if(!buttonState && buttonTransition){
     app_timer_start(drink_it,APP_TIMER_TICKS(drinkTimeOut),NULL);
     buttonTransition = 0;
@@ -132,43 +139,22 @@ static void drv_motion_evt_handler(drv_motion_evt_t const * p_evt, void * p_data
       int32_t     * p_raw = (int32_t *)p_data;
       char buffer[24];
 
-      //#################################################
+      // //#################################################
      
-            x =       (int16_t)(p_raw[3] >> RAW_Q_FORMAT_GYR_INTEGER_BITS);
-            y =       (int16_t)(p_raw[4] >> RAW_Q_FORMAT_GYR_INTEGER_BITS);
-            z =       (int16_t)(p_raw[5] >> RAW_Q_FORMAT_GYR_INTEGER_BITS);
+      //       x =       (int16_t)(p_raw[6] >> RAW_Q_FORMAT_CMP_INTEGER_BITS);
+      //       y =       (int16_t)(p_raw[7] >> RAW_Q_FORMAT_CMP_INTEGER_BITS);
+      //       z =       (int16_t)(p_raw[8] >> RAW_Q_FORMAT_CMP_INTEGER_BITS);
       
-      //sprintf(buffer, "Orrientation %.2f,%.2f,%.2f", 
-      //                              x,
-      //                              y,
-      //                              z);
+      // //sprintf(buffer, "Orrientation %.2f,%.2f,%.2f", 
+      // //                              x,
+      // //                              y,
+      // //                              z);
 
-      //NRF_LOG_INFO(" %s\r\n", buffer);
+      // //NRF_LOG_INFO(" %s\r\n", buffer);
 
-      process_bottle_data(x,y,z);
+      // process_bottle_data(x,y,z);
 
-      //#########################^^^^^^^####################
-
-
-      // double x_buf;
-      // double y_buf;
-      // double z_buf;
-
-      // //convert fixed point from MPU to floating point
-      // x_buf = (double)p_raw[0];
-      // x_buf = x_buf/(1<<16);
-      
-      // y_buf = (double)p_raw[1];
-      // y_buf = y_buf/(1<<16);
-
-      // z_buf = (double)p_raw[2];
-      // z_buf = z_buf/(1<<16);
-
-      // //format as string for debugging purposes and print accelerometer values to segger RTT console channel 1
-      // sprintf(buffer, "ACCEL_DATA %.2f,%.2f,%.2f", x_buf,y_buf,z_buf);
-      // NRF_LOG_INFO(" %s\r\n", buffer);
-
-      // process_accel_data(x_buf,y_buf,z_buf);
+      // //#########################^^^^^^^####################
     }
     break;
 
@@ -186,7 +172,28 @@ static void drv_motion_evt_handler(drv_motion_evt_t const * p_evt, void * p_data
                                                                       p_pedo[1]);
     }
     break;
-    
+
+    case DRV_MOTION_EVT_EULER:
+        {
+            APP_ERROR_CHECK_BOOL(size == sizeof(long) * 3);
+
+            ble_tms_euler_t data;
+            int32_t      * p_euler = (int32_t *)p_data;
+
+            int x   = p_euler[0]/(1<<16);
+            int y  = p_euler[1]/(1<<16);
+            int z    = p_euler[2]/(1<<16);
+            
+            process_bottle_data(x,y,z);
+
+
+            //NRF_LOG_DEBUG("DRV_MOTION_EVT_EULER, [deg]:  roll(x):%3d   pitch(y):%3d   yaw(z):%3d  \r\n", data.roll/(1<<16), data.pitch/(1<<16), data.yaw/(1<<16));
+
+            (void)ble_tms_euler_set(&m_tms, &data);
+        }
+        break;
+  
+
   }
 }
 
@@ -249,23 +256,7 @@ static void drink_clock_handler(void * p_context){
     m_ui_led_constant_set(255,165,100);
     //drv_speaker_tone_start(440,1000,50);
     drv_speaker_sample_play(6);
-    /*
-    //drv_speaker_sample_play(6);
-    //drv_speaker_tone_start(261,100,100);//C
-    //drv_speaker_tone_start(261,100,100);//C
-    //drv_speaker_tone_start(329,1000,50);//E
-
-    //drv_speaker_tone_start(220,1000,70);//A
-
-    //drv_speaker_tone_start(184,1000,50);//F
-
-    //drv_speaker_tone_start(220,1000,50);//A
-
-    //drv_speaker_tone_start(195,1000,50);//G
-
-    //drv_speaker_tone_start(246,1000,50);//B
-    //app_timer_start(drink_it,APP_TIMER_TICKS(100),NULL);
-    */
+   
 }
 //##############################################
 
@@ -274,15 +265,7 @@ uint32_t raw_gyro_enable(void)
   uint32_t err_code;
   err_code = drv_motion_enable(DRV_MOTION_FEATURE_MASK_RAW_GYRO);
 
-  //##############Drinking CountDown###############
-  /*
-  */
-    err_code = app_timer_create(&drink_it,APP_TIMER_MODE_REPEATED,drink_clock_handler);
-    APP_ERROR_CHECK(err_code);
-    
-    err_code = app_timer_start(drink_it,APP_TIMER_TICKS(drinkTimeOut),NULL);
-    APP_ERROR_CHECK(err_code);
-  //###########################################
+  
   return err_code;
 }
 
@@ -322,6 +305,26 @@ uint32_t pedometer_disable(void)
                 APP_ERROR_CHECK(err_code);
                 return err_code;
 }
+//###################################
+//enables the orientation data collection of the thingy
+uint32_t EULER_enable(void)
+{
+  uint32_t err_code;
+  err_code = drv_motion_enable(DRV_MOTION_FEATURE_MASK_EULER);
+  APP_ERROR_CHECK(err_code);
+
+  //##############Drinking CountDown###############
+    //timer is initialized on start up of the gyroscope
+    err_code = app_timer_create(&drink_it,APP_TIMER_MODE_REPEATED,drink_clock_handler);
+    APP_ERROR_CHECK(err_code);
+    
+    err_code = app_timer_start(drink_it,APP_TIMER_TICKS(drinkTimeOut),NULL);
+    APP_ERROR_CHECK(err_code);
+
+  //###########################################
+
+  return err_code;
+//#####################################
 
 
 uint32_t process_accel_data(double x, double y, double z)

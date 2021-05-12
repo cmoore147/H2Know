@@ -347,7 +347,8 @@ int main(void)
 
     board_init();
     thingy_init();
-    raw_gyro_enable();
+    //raw_gyro_enable();
+    EULER_enable();
     //pedometer_enable();
 
     for (;;)
